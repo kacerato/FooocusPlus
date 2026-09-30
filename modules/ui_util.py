@@ -102,6 +102,10 @@ def generate_clicked(task: worker.AsyncTask):
     worker.async_tasks.append(task)
 
     while not finished:
+        if worker.worker_error is not None:
+            raise gr.Error(f'Generation worker failed to initialize: {worker.worker_error}')
+        if task.error is not None:
+            raise gr.Error(f'Generation failed: {task.error}')
         time.sleep(0.01)
         if len(task.yields) > 0:
             flag, product = task.yields.pop(0)
@@ -227,7 +231,32 @@ def bind_ip_slot_logic(image_comp, radio_comp, stop_slider, weight_slider, slot_
     )
 
 
-def inpaint_mode_change(mode, inpaint_engine_version):
+def inpaint_mode_change(mode, inpaint_engine_version, backend_params=None):
+    method = (backend_params or {}).get('task_method') or common.default_engine.get('backend_params', {}).get('task_method')
+    is_zimage = method == 'ZIT_inpaint'
+    if is_zimage:
+        common.inpaint_mode = 'Z-Image Inpaint'
+        common.inpaint_strength = 0.9
+        return [
+            gr.update(visible=mode != flags.inpaint_option_default),
+            gr.update(visible=mode == flags.inpaint_option_default, value=[]),
+            gr.Dataset.update(visible=False),
+            gr.update(visible=False, value=True),
+            gr.update(visible=False, value='None'),
+            gr.update(label='Preserve Context (Z-Image ControlNet)', value=0.9,
+                      info='ControlNet guidance strength; recommended 0.65–1.0. The full eight-step edit is composited only inside the mask.'),
+            0.618 if mode == flags.inpaint_option_default else 0.0,
+        ]
+
+    result = fooocus_inpaint_mode_change(mode, inpaint_engine_version)
+    result[3] = gr.update(visible=True, value=result[3])
+    result[4] = gr.update(visible=True, value=result[4])
+    result[5] = gr.update(label='Inpainting Strength', value=result[5],
+                          info='Denoising strength: how much the masked region changes.')
+    return result
+
+
+def fooocus_inpaint_mode_change(mode, inpaint_engine_version):
 
     if mode == inpaint_option_detail:
         common.inpaint_mode = 'Inpaint Detail'

@@ -122,7 +122,9 @@ def switch_layout_template(presetdata: dict | str, state_params, preset_url=''):
     results.append(update_value_if_existed("mixing_image_prompt_and_inpaint"))
     results.append(update_value_if_existed("backfill_prompt"))
     results.append(update_value_if_existed("translation_methods"))
-    results.append(False if template_engine not in ['Fooocus', 'Comfy'] else update_value_if_existed("input_image_checkbox"))
+    results.append(True if task_method == 'ZIT_inpaint' else
+                   False if template_engine not in ['Fooocus', 'Comfy'] else
+                   update_value_if_existed("input_image_checkbox"))
     if 'image_catalog_max_number' in presetdata_dict:
         state_params.update({'__max_catalog': presetdata_dict['image_catalog_max_number']})
     results.append(state_params)

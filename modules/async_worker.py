@@ -127,6 +127,7 @@ class AsyncTask:
         self.results = []
         self.last_stop = False
         self.processing = False
+        self.error = None
 
         self.performance_loras = []
 
@@ -427,6 +428,7 @@ class AsyncTask:
         build_image_type(self, base_type, update_global=True)
 
 async_tasks = []
+worker_error = None
 
 
 class EarlyReturnException(BaseException):
@@ -535,7 +537,11 @@ def worker():
                 seed=task['task_seed'],
                 )
             default_params.update(async_task.params_backend)
-            if async_task.layer_input_image is None:
+            if async_task.task_method == 'ZIT_inpaint':
+                default_params['control_strength'] = async_task.inpaint_strength
+                input_images = getattr(async_task, 'comfy_inpaint_images', None)
+                default_params['vae'] = async_task.vae_name
+            elif async_task.layer_input_image is None:
                 input_images = None
             else:
                 input_images = [HWC3(async_task.layer_input_image)]
@@ -545,13 +551,11 @@ def worker():
                         default_params, input_images, options)
                 imgs = comfypipeline.process_flow(comfy_task.name, comfy_task.params, comfy_task.images, callback=callback)
             except ValueError as e:
-                interpret('Task Error:', 'Comfy ' + e)
-                empty_path = [np.zeros((width, height), dtype=np.uint8)]
-                imgs = empty_path
-                current_progress = int(base_progress + (100 - preparation_steps) / float(all_steps) * steps)
-                yield_result(async_task, empty_path, current_progress, async_task.black_out_nsfw, False,
-                    do_not_show_finished_images=not show_intermediate_results)
-                return imgs, [], current_progress
+                raise RuntimeError(f'Comfy generation failed: {e}') from e
+            if async_task.task_method == 'ZIT_inpaint':
+                if not imgs:
+                    raise RuntimeError('Z-Image inpainting returned no image.')
+                imgs = [inpaint_worker.current_task.post_process(x) for x in imgs]
 
         else:
 
@@ -946,8 +950,21 @@ def worker():
             image=inpaint_image,
             mask=inpaint_mask,
             use_fill=denoising_strength > 0.99,
-            k=inpaint_respective_field
+            k=inpaint_respective_field,
+            native=(async_task.task_method == 'ZIT_inpaint' or
+                    getattr(getattr(pipeline.final_unet, 'model', None), 'inpaint_model', False))
         )
+        if async_task.task_method == 'ZIT_inpaint':
+            task = inpaint_worker.current_task
+            async_task.comfy_inpaint_images = {
+                'input_image': task.interested_image,
+                'input_mask': np.repeat(task.interested_mask[:, :, None], 3, axis=2),
+            }
+            height, width = task.interested_image.shape[:2]
+            progressbar(async_task, current_progress, 'Preparing Z-Image image + mask conditioning...')
+            # Union was distilled for a full eight-step trajectory; the source
+            # and keep-mask guide the model, followed by masked compositing.
+            return 1.0, None, width, height, current_progress
         if async_task.debugging_inpaint_preprocessor:
             interpret('Debugging the inpaint preprocessor:', debugging_inpaint_preprocessor)
             yield_result(async_task, inpaint_worker.current_task.visualize_mask_processing(), 100,
@@ -986,6 +1003,10 @@ def worker():
             pixels=inpaint_pixel_fill)['samples']
         inpaint_worker.current_task.load_latent(
             latent_fill=latent_fill, latent_mask=latent_mask, latent_swap=latent_swap)
+        if getattr(pipeline.final_unet.model, 'inpaint_model', False):
+            inpaint_worker.current_task.native_masked_latent = latent_inpaint
+            inpaint_parameterized = False
+            interpret('[Inpaint] Native 9-channel checkpoint: masked image + mask conditioning.')
         if inpaint_parameterized:
             pipeline.final_unet = inpaint_worker.current_task.patch(
                 inpaint_head_model_path=inpaint_head_model_path,
@@ -1510,7 +1531,8 @@ def worker():
         width, show_intermediate_results=True, persist_image=True):
         base_model_additional_loras = []
         inpaint_head_model_path = None
-        inpaint_parameterized = inpaint_engine != 'None'  # inpaint_engine = None, improve detail
+        inpaint_parameterized = (inpaint_engine != 'None'
+            and not loader.is_native_inpaint_checkpoint(async_task.base_model_name))
         initial_latent = None
 
         prompt = prepare_enhance_prompt(prompt, async_task.prompt)
@@ -1889,6 +1911,21 @@ def worker():
 
         inpaint_worker.current_task = None
         inpaint_parameterized = async_task.inpaint_engine != 'None'
+        if async_task.task_method == 'ZIT_inpaint':
+            inpaint_parameterized = False
+            async_task.inpaint_engine = 'Z-Image Fun Union 2.1-2602'
+            async_task.inpaint_disable_initial_latent = True
+            if not async_task.input_image_checkbox or async_task.current_tab != 'inpaint':
+                raise ValueError('Z-Image inpaint requires Input Image and the Inpaint or Outpaint tab.')
+        if loader.is_native_inpaint_checkpoint(async_task.base_model_name):
+            # Dedicated nine-channel checkpoints already contain their inpainter.
+            # The Fooocus four-channel LoRA/head must not be stacked onto them.
+            inpaint_parameterized = False
+            async_task.inpaint_engine = 'Native checkpoint'
+            if async_task.refiner_model_name != 'None':
+                raise ValueError('Native inpainting requires Refiner = None.')
+            if not async_task.input_image_checkbox or async_task.current_tab != 'inpaint':
+                raise ValueError('This is an inpainting-only model. Enable Input Image, select Inpaint or Outpaint, and supply an image and mask.')
         inpaint_image = None
         inpaint_mask = None
         inpaint_head_model_path = None
@@ -1908,6 +1945,9 @@ def worker():
                 async_task, base_model_additional_loras, clip_vision_path, controlnet_canny_path, controlnet_cpds_path,
                 goals, inpaint_head_model_path, inpaint_image, inpaint_mask, inpaint_parameterized, ip_adapter_face_path,
                 ip_adapter_path, ip_negative_path, skip_prompt_processing, use_synthetic_refiner)
+
+        if async_task.task_method == 'ZIT_inpaint' and 'inpaint' not in goals:
+            raise ValueError('Upload an image and paint a non-empty mask before generating with Z-Image Inpaint.')
 
         # Load or unload CNs
         print()
@@ -2298,13 +2338,24 @@ def worker():
                 task.yields.append(['finish', task.results])
                 if task.task_class not in flags.comfy_classes:
                     pipeline.prepare_text_encoder(async_call=True)
-            except:
+            except Exception as error:
                 # MAY NEED TO COMMENT OUT:
                 traceback.print_exc()
+                task.error = f'{type(error).__name__}: {error}'
                 task.yields.append(['finish', task.results])
             finally:
                 if pid in modules.patch.patch_settings:
                     del modules.patch.patch_settings[pid]
     pass
 
-threading.Thread(target=worker, daemon=True).start()
+def run_worker():
+    global worker_error
+    try:
+        worker()
+    except Exception as error:
+        import traceback
+        worker_error = f'{type(error).__name__}: {error}'
+        traceback.print_exc()
+
+
+threading.Thread(target=run_worker, daemon=True).start()

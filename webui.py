@@ -58,6 +58,9 @@ from modules.ui_gradio_extensions import reload_javascript
 from modules.util import is_json, recover_images
 
 allow_inpaint_max = False
+zimage_inpaint_default = common.default_engine.get('backend_params', {}).get('task_method') == 'ZIT_inpaint'
+if zimage_inpaint_default:
+    common.inpaint_strength = 0.9
 
 btn_torch_value = interpret(
     'Reconfigure', 'PyTorch', silent = True)
@@ -1182,21 +1185,23 @@ with common.GRADIO_ROOT:
 
                                 inpaint_engine = gr.Dropdown(
                                     label='Inpaint Engine',
+                                    visible=not zimage_inpaint_default,
                                     value=config.default_inpaint_engine_version,
                                     choices=flags.inpaint_engine_versions,
                                     info='Version of Fooocus Inpaint model. If set, use performance Quality or Speed (no performance LoRAs) for best results')
 
                                 inpaint_disable_initial_latent = gr.Checkbox(
                                     label='Disable Initial Latent in Inpaint',
+                                    visible=not zimage_inpaint_default,
                                     value=False,
                                     info = 'Used by default with the "Modify Content" Inpaint Method: replace objects or backgrounds.')
 
                             with gr.Row():
                                 inpaint_strength = gr.Slider(
-                                    label='Inpainting Strength',
+                                    label='Preserve Context (Z-Image ControlNet)' if zimage_inpaint_default else 'Inpainting Strength',
                                     minimum=0.0, maximum=1.0,
-                                    step=0.001, value=1.0,
-                                    info='Adjusts the amount that Inpainting changes the image. '
+                                    step=0.001, value=0.9 if zimage_inpaint_default else 1.0,
+                                    info='ControlNet guidance strength; recommended 0.65–1.0. Edits are composited only inside the mask.' if zimage_inpaint_default else 'Adjusts the amount that Inpainting changes the image. '
                                     'Inpainting Strength is also called "Denoising Strength". '
                                     'Outpainting is at full strength: 1.0')
 
@@ -3461,7 +3466,7 @@ with common.GRADIO_ROOT:
     inpaint_mode.change(
         UIU.inpaint_mode_change,
         inputs=[inpaint_mode,
-                inpaint_engine_state],
+                inpaint_engine_state, params_backend],
         outputs=[inpaint_additional_prompt,
                  outpaint_selections,
                  example_inpaint_prompts,
@@ -6066,6 +6071,7 @@ common.GRADIO_ROOT.launch(
     server_name=cli_args.listen,
     server_port=cli_args.port,
     share=False, quiet=True,
+    auth=(os.environ["AERO_WEB_USER"], os.environ["AERO_WEB_PASSWORD"]),
     allowed_paths=[config.path_outputs], # allows log viewing
     blocked_paths=[constants.AUTH_FILENAME]
 )

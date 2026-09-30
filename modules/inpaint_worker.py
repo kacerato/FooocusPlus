@@ -148,7 +148,7 @@ def fooocus_fill(image, mask):
 
 
 class InpaintWorker:
-    def __init__(self, image, mask, use_fill=True, k=0.618):
+    def __init__(self, image, mask, use_fill=True, k=0.618, native=False):
         a, b, c, d = compute_initial_abcd(mask > 0)
         a, b, c, d = solve_abcd(mask, a, b, c, d, k=k)
 
@@ -174,7 +174,9 @@ class InpaintWorker:
             self.interested_fill = fooocus_fill(self.interested_image, self.interested_mask)
 
         # soft pixels
-        self.mask = morphological_open(mask)
+        # Native checkpoints edit only the supplied mask. Feather inward without
+        # expanding the editable region into the original background.
+        self.mask = np.minimum(mask, box_blur(mask, 4)) if native else morphological_open(mask)
         self.image = image
 
         # ending
@@ -182,6 +184,7 @@ class InpaintWorker:
         self.latent_after_swap = None
         self.swapped = False
         self.latent_mask = None
+        self.native_masked_latent = None
         self.inpaint_head_feature = None
         return
 

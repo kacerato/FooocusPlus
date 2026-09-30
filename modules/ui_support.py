@@ -591,6 +591,9 @@ from transformers import CLIPTokenizer
 
 config_clip_path = Path(common.path_clip_vision)
 cur_clip_path = Path(config_clip_path/'clip-vit-large-patch14').resolve()
+if not cur_clip_path.exists():
+    # Use the same bundled CLIP vocabulary as the SDXL text encoder.
+    cur_clip_path = Path(__file__).resolve().parents[1] / 'ldm_patched' / 'modules' / 'sd1_tokenizer'
 if cur_clip_path.exists():
     tokenizer = CLIPTokenizer.from_pretrained(str(cur_clip_path))
 else:

@@ -1,4 +1,6 @@
 import os  # Strictly used only for os.environ environment variable checks
+import json
+import struct
 from pathlib import Path
 from urllib.parse import urlparse
 from typing import Optional
@@ -19,6 +21,27 @@ path_wildcards = Path(current_dir / 'wildcards')
 sd15_model_path = 'SD1.5/realisticVisionV60B1_v51VAE.safetensors'
 vae_filenames = []
 wildcard_filenames = []
+
+
+def is_native_inpaint_checkpoint(model_name):
+    """Inspect the UNet input shape; names alone do not prove inpaint support."""
+    key = f'checkpoints/{model_name}'
+    if not common.MODELS_INFO.exists_model_key(key):
+        return False
+    path = Path(common.MODELS_INFO.get_model_key_info(key)['file'][0])
+    if path.suffix.lower() != '.safetensors':
+        return False
+    with path.open('rb') as stream:
+        header_size = struct.unpack('<Q', stream.read(8))[0]
+        if header_size > 100 * 1024 * 1024:
+            raise ValueError(f'Invalid Safetensors header: {model_name}')
+        header = json.loads(stream.read(header_size))
+    for key in ('model.diffusion_model.input_blocks.0.0.weight',
+                'diffusion_model.input_blocks.0.0.weight', 'input_blocks.0.0.weight'):
+        shape = header.get(key, {}).get('shape', [])
+        if len(shape) == 4:
+            return shape[1] == 9
+    return False
 
 
 def is_comfy_checkpoint(file_path_str: str) -> bool:

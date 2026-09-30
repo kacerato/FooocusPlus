@@ -1124,6 +1124,7 @@ comfyui:
      clip_vision: {clip_vision}
      clip: {clip}
      controlnet: {controlnets}
+     model_patches: {model_patches}
      diffusers: {diffusers}
      embeddings: {embeddings}
      loras: {loras}
@@ -1142,6 +1143,7 @@ config_comfy_text = config_comfy_formatted_text.format(
     clip_vision=path_clip_vision,
     clip=path_clip,
     controlnets=paths2str(paths_controlnet, 'controlnet'),
+    model_patches=Path(path_models_root / 'model_patches').resolve(),
     diffusers=paths2str(paths_diffusers, 'diffusers'),
     embeddings=path_embeddings,
     loras=paths2str(paths_loras, 'loras'),

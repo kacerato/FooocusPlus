@@ -1,4 +1,5 @@
 from pathlib import Path
+from safetensors import safe_open
 
 import common
 import ldm_patched
@@ -214,12 +215,32 @@ def get_comfy_task(task_name, task_method, default_params, input_images, options
         if is_z_model:
             base_model_key = f'checkpoints/{base_model}'
 
-            # Check if it is an All-In-One model (> 10 GB) or Split model
+            if task_method == 'ZIT_inpaint':
+                if not isinstance(input_images, dict) or not all(
+                        key in input_images for key in ('input_image', 'input_mask')):
+                    raise ValueError('Z-Image inpaint requires an input image and a painted mask.')
+                if '.gguf' in base_model.lower():
+                    raise ValueError('This Z-Image inpaint workflow requires a Safetensors diffusion model.')
+                comfy_params.update_params({'base_model_dtype': 'default'})
+                comfy_params.set_mapping_rule({
+                    'input_mask': 'LoadImage:input_mask:image',
+                    'control_strength': 'ZImageFunControlnet:inpaint_control:strength',
+                    'vae': 'VAELoader:Load VAE:vae_name',
+                })
+                return ComfyTask(task_method, comfy_params, input_images)
+
+            # BF16 diffusion-only Z-Image files exceed 10 GB too. Inspect
+            # bundled components instead of inferring architecture from size.
             is_all_in_one = False
             if common.MODELS_INFO.exists_model_key(base_model_key):
-                model_size_gb = common.MODELS_INFO.get_model_key_info(base_model_key)['size'] / (1024 * 1024 * 1024)
-                if model_size_gb > 10.0:
-                    is_all_in_one = True
+                model_file = common.MODELS_INFO.get_model_key_info(base_model_key)['file'][0]
+                if Path(model_file).suffix.lower() == '.safetensors':
+                    with safe_open(model_file, framework='pt', device='cpu') as checkpoint:
+                        keys = checkpoint.keys()
+                        is_all_in_one = (
+                            any(key.startswith('text_encoders.') for key in keys)
+                            and any(key.startswith('vae.') for key in keys)
+                        )
 
             if is_all_in_one:
                 # Force the All-In-One workflow
@@ -241,7 +262,8 @@ def get_comfy_task(task_name, task_method, default_params, input_images, options
                 if '.gguf' in base_model.lower():
                     comfy_params.delete_params(['base_model_dtype'])
                 elif comfy_params.params.get('base_model_dtype') == 'auto':
-                    comfy_params.update_params({'base_model_dtype': 'fp8_e4m3fn'})
+                    # Let UNETLoader honor the stored weights, including BF16.
+                    comfy_params.update_params({'base_model_dtype': 'default'})
 
             return ComfyTask(task_method, comfy_params)
 

@@ -53,7 +53,10 @@ def get_history(prompt_id):
 
 
 def get_images(ws, prompt, callback=None):
-    prompt_id = queue_prompt(prompt)['prompt_id']
+    queued = queue_prompt(prompt)
+    if not queued or 'prompt_id' not in queued:
+        raise RuntimeError(f'Comfy rejected the workflow: {queued}')
+    prompt_id = queued['prompt_id']
     print('[ComfyClient] Request and get ComfyTask_id:{}'.format(prompt_id))
     output_images = {}
     current_node = ''
@@ -74,6 +77,9 @@ def get_images(ws, prompt, callback=None):
         if isinstance(out, str):
             message = json.loads(out)
             current_type = message['type']
+            if current_type == 'execution_error' and message['data'].get('prompt_id') == prompt_id:
+                error = message['data']
+                raise RuntimeError(f"Comfy node {error.get('node_type')} failed: {error.get('exception_message')}")
             if message['type'] == 'executing':
                 data = message['data']
                 if data['node'] is None and data['prompt_id'] == prompt_id:

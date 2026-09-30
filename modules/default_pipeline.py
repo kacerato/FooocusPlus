@@ -448,6 +448,21 @@ def process_diffusion(positive_cond, negative_cond, steps, switch, width, height
     else:
         initial_latent = latent
 
+    if getattr(target_unet.model, 'inpaint_model', False):
+        task = modules.inpaint_worker.current_task
+        if task is None or task.native_masked_latent is None:
+            raise ValueError('Native inpainting requires an input image and a painted mask.')
+        if target_refiner_unet is not None:
+            raise ValueError('Native inpainting requires Refiner = None.')
+        native_condition = {
+            'concat_latent_image': task.native_masked_latent,
+            'concat_mask': task.latent_mask,
+        }
+        positive_cond = [[embedding, {**metadata, **native_condition}]
+                         for embedding, metadata in positive_cond]
+        negative_cond = [[embedding, {**metadata, **native_condition}]
+                         for embedding, metadata in negative_cond]
+
     minmax_sigmas = calculate_sigmas(sampler=sampler_name, scheduler=scheduler_name, model=final_unet.model, steps=steps, denoise=denoise)
     sigma_min, sigma_max = minmax_sigmas[minmax_sigmas > 0].min(), minmax_sigmas.max()
     sigma_min = float(sigma_min.cpu().numpy())
