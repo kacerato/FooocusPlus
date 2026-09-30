@@ -240,7 +240,7 @@ def inpaint_mode_change(mode, inpaint_engine_version, backend_params=None):
         return [
             gr.update(visible=mode != flags.inpaint_option_default),
             gr.update(visible=mode == flags.inpaint_option_default, value=[]),
-            gr.Dataset.update(visible=False),
+            gr.Dataset.update(visible=False, samples=[]),
             gr.update(visible=False, value=True),
             gr.update(visible=False, value='None'),
             gr.update(label='Preserve Context (Z-Image ControlNet)', value=0.9,

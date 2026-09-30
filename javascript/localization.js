@@ -100,7 +100,7 @@ function localizeWholePage() {
         return gradioApp().getElementById(elem_id);
     }
 
-    for (var comp of window.gradio_config.components) {
+    for (var comp of (window.gradio_config?.components || [])) {
         if (comp.props.webui_tooltip) {
             let e = elem(comp);
 

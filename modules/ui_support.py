@@ -70,9 +70,9 @@ refresh_topbar_status_js = '''
 function(system_params) {
     const preset=system_params["__preset"];
     const theme=system_params["__theme"];
-    const nav_name_list_str = system_params["__nav_name_list"];
-    let nav_name_list = new Array();
-    nav_name_list = nav_name_list_str.split(",")
+    const nav_names = system_params["__nav_name_list"];
+    const nav_name_list = Array.isArray(nav_names) ? nav_names :
+        (typeof nav_names === "string" ? nav_names.split(",") : []);
     for (let i=0;i<nav_name_list.length;i++) {
         let item_id = "bar"+i;
         let item_name = nav_name_list[i];

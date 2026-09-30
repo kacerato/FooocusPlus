@@ -1,6 +1,7 @@
 # based on https://github.com/AUTOMATIC1111/stable-diffusion-webui/blob/v1.6.0/modules/ui_gradio_extensions.py
 
 import os
+import hashlib
 import gradio as gr
 import args_manager
 import modules.config
@@ -20,7 +21,11 @@ def webpath(fn):
     else:
         web_path = os.path.abspath(fn)
 
-    return f'file={web_path}?{os.path.getmtime(fn)}'
+    # Modal normalizes uploaded timestamps. Version assets by their content so
+    # a deployment cannot reuse a cached script from the previous revision.
+    with open(fn, 'rb') as asset:
+        revision = hashlib.sha256(asset.read()).hexdigest()[:16]
+    return f'file={web_path}?v={revision}'
 
 
 def javascript_html():
